@@ -1,0 +1,53 @@
+{
+  "name": "@zebracat/sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript and JavaScript client for the Zebracat video API",
+  "license": "MIT",
+  "author": "Zebracat",
+  "homepage": "https://api.zebracat.ai/docs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zebracatai/zebracat-node.git"
+  },
+  "keywords": ["zebracat", "video", "ai", "api", "sdk"],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "test": "npm run build && node --test test/client.test.mjs",
+    "prepublishOnly": "npm run generate:check && npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "openapi-typescript": "7.13.0",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
