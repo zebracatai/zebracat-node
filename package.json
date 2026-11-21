@@ -1,6 +1,6 @@
 {
   "name": "@zebracat/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Official TypeScript and JavaScript client for the Zebracat video API",
   "license": "MIT",
   "author": "Zebracat",
