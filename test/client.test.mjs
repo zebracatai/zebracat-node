@@ -1,7 +1,9 @@
 // The hand-written layer against a local stub server: auth, retries, idempotency keys, typed errors, waiting.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   Zebracat,
   VERSION,
@@ -261,8 +263,46 @@ test("waitForVideo pollIntervalMs overrides", async () => {
 // ------------------------------------------------------------------ shapes
 
 test("download returns the redirect Location", async () => {
-  stub.on("GET", `${API}/video/${TASK}/download`, { status: 302, headers: { Location: "https://cdn/v.mp4" } });
-  assert.equal(await makeClient().downloadVideo(TASK), "https://cdn/v.mp4");
+  stub.on("GET", `${API}/videos/${TASK}/download`, { status: 302, headers: { Location: "https://cdn/v.mp4" } });
+  assert.equal(await makeClient().downloadVideoFile(TASK), "https://cdn/v.mp4");
+});
+
+test("uploadWithLink sends a local file to the link without credentials", async () => {
+  const token = "Tq3:1v4:Zx";
+  stub.on("POST", `${API}/uploads/link`, {
+    status: 201,
+    body: {
+      upload_url: `https://api.zebracat.ai${API}/uploads/link/${token}`,
+      method: "PUT",
+      url: "https://cdata.zebracat.ai/api-uploads/video/5b0e41.mp4",
+      use: "translate",
+    },
+  });
+  const stored = { url: "https://cdata.zebracat.ai/api-uploads/video/5b0e41.mp4", use: "translate", content_type: "video/mp4", size: 12, seconds: 1.5, name: "talk.mp4" };
+  stub.on("PUT", `${API}/uploads/link/Tq3%3A1v4%3AZx`, { status: 201, body: stored });
+  const dir = mkdtempSync(join(tmpdir(), "zebracat-sdk-"));
+  const path = join(dir, "talk.mp4");
+  const bytes = Buffer.from([0, 0, 0, 0x20, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32]);
+  writeFileSync(path, bytes);
+  try {
+    assert.deepEqual(await makeClient().uploadWithLink(path, { use: "translate" }), stored);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  const [link, put] = stub.calls();
+  assert.deepEqual(JSON.parse(link.body.toString()), { use: "translate", filename: "talk.mp4" });
+  assert.equal(link.headers["x-api-key"], "sk-test");
+  assert.equal(put.method, "PUT");
+  assert.ok(put.body.equals(bytes));
+  assert.equal(put.headers["content-type"], "application/octet-stream");
+  assert.equal(put.headers["x-api-key"], undefined);
+  assert.equal(put.headers.authorization, undefined);
+});
+
+test("an operation without security sends no credentials", async () => {
+  stub.on("GET", `${API}/capabilities`, { status: 200, body: { capabilities: [] } });
+  await makeClient().listCapabilities();
+  assert.equal(stub.calls()[0].headers["x-api-key"], undefined);
 });
 
 test("delete resolves undefined", async () => {

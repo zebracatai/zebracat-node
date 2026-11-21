@@ -70,6 +70,8 @@ function bodyKind(spec, op) {
   if (!rb) return null;
   const types = Object.keys(rb.content);
   const first = types[0];
+  // The raw bytes of one file (an upload link).
+  if (first === "application/octet-stream") return "binary";
   const props = resolve(spec, rb.content[first].schema).properties || {};
   const hasFile = Object.values(props).some((p) => resolve(spec, p).format === "binary");
   if (first === "multipart/form-data" && (hasFile || !types.includes("application/json"))) return "multipart";
@@ -120,21 +122,24 @@ function renderOperations(spec) {
       const kind = bodyKind(spec, op);
       const responses = op.responses || {};
       const paid = method === "post" && ("402" in responses || EXTRA_PAID.has(id));
+      // An operation without `security` takes no credentials (a public catalogue, an upload link).
+      const auth = !!(op.security ?? spec.security)?.length;
       const params = [...(item.parameters || []), ...(op.parameters || [])];
       const pathParams = params.filter((p) => p.in === "path");
       const queryParams = params.filter((p) => p.in === "query");
       const queryNames = queryParams.map((p) => p.name);
-      const bodyProps = kind ? Object.keys(resolve(spec, op.requestBody.content[kind === "json" ? "application/json" : Object.keys(op.requestBody.content)[0]].schema).properties || {}) : [];
+      const bodyProps = kind && kind !== "binary" ? Object.keys(resolve(spec, op.requestBody.content[kind === "json" ? "application/json" : Object.keys(op.requestBody.content)[0]].schema).properties || {}) : [];
       const wrapped = bodyProps.some((p) => queryNames.includes(p));
-      const contentType = kind === "json" ? "application/json" : kind ? Object.keys(op.requestBody.content).find((c) => c.startsWith("multipart")) || Object.keys(op.requestBody.content)[0] : null;
+      const contentType = kind === "json" ? "application/json" : kind === "binary" ? "application/octet-stream" : kind ? Object.keys(op.requestBody.content).find((c) => c.startsWith("multipart")) || Object.keys(op.requestBody.content)[0] : null;
 
       table.push(
         `  ${id}: { operationId: ${q(id)}, method: ${q(method.toUpperCase())}, path: ${q(path)}, ` +
           `body: ${kind ? q(kind) : "null"}, query: ${q(queryNames)}, wrapped: ${wrapped}, paid: ${paid}, ` +
-          `replaysIdempotencyKey: ${REPLAYS_IDEMPOTENCY_KEY.has(id)}, deprecated: ${!!op.deprecated} },`,
+          `replaysIdempotencyKey: ${REPLAYS_IDEMPOTENCY_KEY.has(id)}, deprecated: ${!!op.deprecated}, auth: ${auth} },`,
       );
 
-      const bodyType = kind ? `NonNullable<Ops[${q(id)}]["requestBody"]>["content"][${q(contentType)}]` : null;
+      let bodyType = kind ? `NonNullable<Ops[${q(id)}]["requestBody"]>["content"][${q(contentType)}]` : null;
+      if (kind === "binary") bodyType = `${bodyType} | Uint8Array | ArrayBuffer`;
       const queryType = queryParams.length ? `NonNullable<Ops[${q(id)}]["parameters"]["query"]>` : null;
       let paramsType = null;
       if (wrapped) paramsType = `{ body: ${bodyType}; query${queryParams.some((p) => p.required) ? "" : "?"}: ${queryType} }`;
