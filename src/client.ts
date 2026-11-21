@@ -20,6 +20,21 @@ const STOP_PHASES = new Set(["completed", "plan_ready", "needs_input"]);
 const FAILED_PHASES = new Set(["failed", "cancelled"]);
 
 export type TaskView = components["schemas"]["TaskView"];
+export type UploadLinkStored = components["schemas"]["UploadLinkStored"];
+
+/** What `uploadWithLink` asks the link for. */
+export interface UploadWithLinkParams {
+  /** `picture` (default), `translate`, `clone`, `swap` or `voice_clone`: the accepted types and caps. */
+  use?: "picture" | "translate" | "clone" | "swap" | "voice_clone";
+  /** The file's name (its extension names the stored file). Defaults to the path's or File's name. */
+  filename?: string;
+  /** The file's type if you know it, e.g. `video/mp4`. */
+  contentType?: string;
+  /** Pictures: what it is for the plan (`person`, `place`, `product`, `style`, `other`, `logo`). */
+  kind?: string;
+  /** What to call it. */
+  name?: string;
+}
 
 /** The tokens the OAuth token endpoint answered. */
 export interface OAuthTokens {
@@ -176,7 +191,7 @@ export class Zebracat extends GeneratedOperations {
       try {
         response = await this.send(url, {
           method: op.method,
-          headers: { ...headers, ...encoded.headers, ...this.authHeaders() },
+          headers: { ...headers, ...encoded.headers, ...(op.auth ? this.authHeaders() : {}) },
           body: encoded.body,
           redirect: "manual",
         }, timeoutMs, opts.signal);
@@ -193,7 +208,7 @@ export class Zebracat extends GeneratedOperations {
         throw new APIConnectionError(`${op.method} ${op.path} failed: ${(err as Error)?.message ?? err}`, requestId, err);
       }
 
-      if (response.status === 401 && this.refreshToken && !refreshed) {
+      if (response.status === 401 && op.auth && this.refreshToken && !refreshed) {
         refreshed = true;
         await response.body?.cancel();
         await this.refresh(sentToken);
@@ -279,6 +294,43 @@ export class Zebracat extends GeneratedOperations {
   }
 
   /**
+   * Upload one file through a one-time upload link and resolve to where it is stored.
+   *
+   * `file` is a local path (Node), a `Blob`/`File`, a `Uint8Array` or an `ArrayBuffer`. `use` picks the accepted
+   * types and caps (`picture`, `translate`, `clone`, `swap`, `voice_clone`); send the answer's `url` to the call
+   * `use` names (a `translate` video goes in `translateVideo({ video_url })`). Two calls: `createUploadLink`, then
+   * the file goes to the link's `upload_url` without credentials (`uploadToLink`).
+   */
+  async uploadWithLink(file: string | Blob | Uint8Array | ArrayBuffer, params: UploadWithLinkParams = {}, options?: RequestOptions): Promise<UploadLinkStored> {
+    let data: Blob | Uint8Array | ArrayBuffer;
+    let filename = params.filename;
+    if (typeof file === "string") {
+      const [{ readFile }, { basename }] = await Promise.all([import("node:fs/promises"), import("node:path")]);
+      data = new Uint8Array(await readFile(file));
+      filename ??= basename(file);
+    } else {
+      data = file;
+      const name = (file as Blob & { name?: string }).name;
+      if (!filename && typeof name === "string" && name) filename = name;
+    }
+    const fields: Record<string, string | undefined> = {
+      use: params.use ?? "picture",
+      filename,
+      content_type: params.contentType,
+      kind: params.kind,
+      name: params.name,
+    };
+    const body = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+    const link = await this.createUploadLink(body as Parameters<GeneratedOperations["createUploadLink"]>[0], options);
+    const marker = "/uploads/link/";
+    const linkPath = new URL(link.upload_url).pathname;
+    const at = linkPath.indexOf(marker);
+    if (at < 0) throw new ZebracatError(`Unexpected upload_url: ${link.upload_url}`);
+    const token = decodeURIComponent(linkPath.slice(at + marker.length));
+    return this.uploadToLink(token, data, options);
+  }
+
+  /**
    * Read `getVideo` until the video stops changing on its own, waiting `poll_after_s` between reads.
    *
    * Resolves when the phase is `completed` (`video_url` is the file), `plan_ready` (a plan made with
@@ -325,6 +377,7 @@ export class Zebracat extends GeneratedOperations {
 function splitParams(op: OperationMeta, params: unknown): { query: Record<string, unknown>; body: Record<string, unknown> | undefined } {
   if (params === undefined || params === null) return { query: {}, body: undefined };
   const all = params as Record<string, unknown>;
+  if (op.body === "binary") return { query: {}, body: params as Record<string, unknown> };
   if (op.wrapped) return { query: (all.query as Record<string, unknown>) ?? {}, body: all.body as Record<string, unknown> };
   const query: Record<string, unknown> = {};
   const body: Record<string, unknown> = {};
@@ -339,6 +392,11 @@ function splitParams(op: OperationMeta, params: unknown): { query: Record<string
 async function encodeBody(op: OperationMeta, body: Record<string, unknown> | undefined): Promise<{ body?: BodyInit; headers: Record<string, string> }> {
   if (!op.body || body === undefined) return { headers: {} };
   if (op.body === "json") return { body: JSON.stringify(body), headers: { "Content-Type": "application/json" } };
+  if (op.body === "binary") {
+    const file = body as unknown as Blob | Uint8Array | ArrayBuffer;
+    const type = file instanceof Blob && file.type ? file.type : "application/octet-stream";
+    return { body: file instanceof Blob ? file : new Blob([file as BlobPart]), headers: { "Content-Type": type } };
+  }
   const form = new FormData();
   for (const [key, value] of Object.entries(body)) {
     if (value === undefined || value === null) continue;

@@ -48,7 +48,8 @@ Pass `auto_generate: true` to plan and generate in one call; `waitForVideo` then
 
 Each operation of the [OpenAPI document](openapi/openapi.json) is a method named after its `operationId` in
 camelCase: `createVideo`, `getVideo`, `listVideos`, `quoteVideo`, `generateVideo`, `cloneVideo`, `translateVideo`,
-`listVoices`, `listTemplates`, `uploadFile`, `createWebhook`, `getAccount`, and the rest.
+`listVoices`, `listTemplates`, `uploadFile`, `createUploadLink`, `createWebhook`, `listCapabilities`, `getAccount`,
+and the rest.
 
 - Path parameters come first: `client.getVideo("6f1c…")`.
 - Then one object with the body fields and query parameters, named as in the API (`snake_case`):
@@ -56,8 +57,20 @@ camelCase: `createVideo`, `getVideo`, `listVideos`, `quoteVideo`, `generateVideo
 - Then per-call options: `{ timeoutMs, maxRetries, headers, idempotencyKey, signal }`.
 - Answers are the API's JSON, typed. Every schema is exported: `import type { Schemas } from "@zebracat/sdk"`,
   then `Schemas["TaskView"]`.
-- Files (`uploadFile`, `createCloneVoice`) take a `Blob` or `File`.
+- Files (`uploadFile`, `createCloneVoice`) take a `Blob` or `File`; `uploadToLink` also takes a `Uint8Array`.
 - Operations the API marks deprecated still work and are marked `@deprecated` for your editor.
+
+## Uploading a file
+
+`uploadFile` takes a picture in one call. For a video to translate, clone or swap, or a voice sample, use a one-time
+upload link: `uploadWithLink` asks for the link (`createUploadLink`) and sends the file to it.
+
+```ts
+const stored = await client.uploadWithLink("talk.mp4", { use: "translate" }); // a local path, Blob or Uint8Array
+const video = await client.translateVideo({ video_url: stored.url, target_language: "es" });
+```
+
+`use` is `picture`, `translate`, `clone`, `swap` or `voice_clone`; it sets the accepted types and the size cap.
 
 ## Authentication
 
@@ -111,7 +124,7 @@ when nothing more happens on its own:
 
 | phase | what you do next |
 |---|---|
-| `completed` | `video_url` is the file; `downloadVideo(taskId)` resolves to the URL as well |
+| `completed` | `video_url` is the file; `downloadVideoFile(taskId)` resolves to the URL as well |
 | `plan_ready` | show `quoteVideo(taskId)`, then `generateVideo(taskId)` and wait again |
 | `needs_input` | answer `question` with `answerVideoQuestion(taskId, {...})` and wait again |
 

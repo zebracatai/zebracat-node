@@ -1,5 +1,5 @@
 export { Zebracat, DEFAULT_BASE_URL, retryAfterSeconds } from "./client.js";
-export type { ClientOptions, OAuthTokens, TaskView, WaitOptions } from "./client.js";
+export type { ClientOptions, OAuthTokens, TaskView, UploadLinkStored, UploadWithLinkParams, WaitOptions } from "./client.js";
 export {
   ZebracatError,
   APIConnectionError,
